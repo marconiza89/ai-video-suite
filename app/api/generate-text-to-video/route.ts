@@ -4,42 +4,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
 
-/**
- * API ROUTE: GENERA VIDEO DA TESTO
- * 
- * Questa route permette di generare video a partire da una descrizione testuale.
- * È la modalità più semplice e flessibile per creare video con Veo.
- * 
- * INPUT:
- * - prompt: string (richiesto) - Descrizione del video da generare
- * - model: string (opzionale) - Modello Veo da usare (default: veo-3.1-generate-preview)
- * - config: object (opzionale) - Configurazione video:
- *   - aspectRatio: "16:9" | "9:16" (default: "16:9")
- *   - resolution: "720p" | "1080p" (default: "720p")
- *   - durationSeconds: 4 | 6 | 8 (default: 8)
- *   - negativePrompt: string (opzionale) - Cosa NON includere
- *   - personGeneration: "allow_all" | "allow_adult" | "dont_allow"
- * 
- * OUTPUT:
- * - operationId: string - ID per il polling dello stato
- * - status: "pending" - Stato iniziale
- * - message: string - Messaggio di conferma
- * 
- * ESEMPIO:
- * POST /api/generate-text-to-video
- * Body: {
- *   "prompt": "Una ripresa cinematografica di un leone nella savana",
- *   "config": {
- *     "aspectRatio": "16:9",
- *     "resolution": "720p",
- *     "durationSeconds": 8
- *   }
- * }
- */
+
 export async function POST(request: NextRequest) {
   try {
     const apiKey = process.env.GOOGLE_GENAI_API_KEY;
-    
+
     if (!apiKey) {
       return NextResponse.json(
         { error: 'API key non configurata' },
@@ -64,7 +33,7 @@ export async function POST(request: NextRequest) {
     const ai = new GoogleGenAI({ apiKey });
 
     // Avvia la generazione del video
-    const operation = await ai.models.generateVideos({
+    let operation = await ai.models.generateVideos({
       model,
       prompt,
       config: {
@@ -76,11 +45,38 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Restituisci l'operation ID per il polling
+    while (!operation.done) {
+      console.log("Waiting for video generation to complete...")
+      await new Promise((resolve) => setTimeout(resolve, 10000));
+      operation = await ai.operations.getVideosOperation({
+        operation: operation,
+      });
+    }
+
+    if (!operation.response || !operation.response.generatedVideos || operation.response.generatedVideos.length === 0) {
+      return NextResponse.json(
+        { error: 'Nessun video generato' },
+        { status: 500 }
+      );
+    }
+
+    const video = operation.response.generatedVideos[0].video;
+    if (!video) {
+      return NextResponse.json(
+        { error: 'Video non disponibile' },
+        { status: 500 }
+      );
+    }
+
+    ai.files.download({
+      file: video,
+      downloadPath: "dialogue_example.mp4",
+    });
+    console.log(`Generated video saved to dialogue_example.mp4`);
+
     return NextResponse.json({
-      operationId: operation.name,
-      status: 'pending',
-      message: 'Generazione video avviata'
+      success: true,
+      message: 'Video generato con successo'
     });
 
   } catch (error: any) {
